@@ -1,8 +1,83 @@
+# Pubky Next.js Template
+
+A complete Next.js template with Tailwind CSS and Pubky integration for building decentralized applications. Key-based identity, censorship resistance, and user control.
+
+## Screenshots
+
+### Homepage
+![Homepage](screenshots/homepage.png)
+
+### Dashboard
+![Dashboard](screenshots/dashboard.png)
+
+### Profile
+![Profile](screenshots/profile.png)
+
+### Settings
+![Settings](screenshots/settings.png)
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+
+## Features
+
+- 🔐 **Pubky Authentication**: Secure key-based identity system
+- 🌐 **Decentralized**: Built on Pubky Core for censorship resistance
+- 🎨 **Modern UI**: Beautiful interface with Tailwind CSS
+- 📱 **Responsive**: Works on all devices
+- 🔧 **TypeScript**: Full type safety
+- ⚡ **Fast**: Optimized Next.js performance
+- 🛡️ **Secure**: User-controlled data and privacy
+
+## Pubky Integration
+
+This template uses the following Pubky packages:
+
+### Core Dependencies
+- **[@synonymdev/pubky](https://www.npmjs.com/package/@synonymdev/pubky)** `^0.5.4` - Core Pubky SDK for decentralized identity and data management
+- **[pubky-app-specs](https://www.npmjs.com/package/pubky-app-specs)** `^0.3.5` - Application specifications and schemas for Pubky apps
+
+### Authentication Flow
+1. **Pubky Ring App** - Mobile app for secure key management and authentication
+2. **QR Code Authentication** - Scan QR codes to connect your Pubky identity
+3. **Decentralized Storage** - Your data is stored on your chosen homeserver
+4. **Key-based Identity** - No passwords, just cryptographic keys
+
+### How it Works
+- Users authenticate using the **Pubky Ring** mobile app
+- The app generates QR codes for secure connection
+- All user data is stored on decentralized homeservers
+- Users maintain full control over their identity and data
+
+## Installation
+
+1. **Clone the repository**
+```bash
+git clone https://github.com/PastaGringo/pubky-nextjs-template.git
+cd pubky-nextjs-template
+```
+
+2. **Install dependencies**
+```bash
+npm install
+# or
+yarn install
+# or
+pnpm install
+```
+
+3. **Set up environment variables**
+```bash
+cp .env.example .env.local
+```
+
+Edit `.env.local` and update the values according to your needs:
+- `NEXT_PUBLIC_PUBKY_APP_ID`: Your unique application ID
+- `NEXT_PUBLIC_PUBKY_APP_NAME`: Your application name
+- `PUBLIC_DOMAIN`: Your domain (localhost:3000 for development)
 
 ## Getting Started
 
-First, run the development server:
+Run the development server:
 
 ```bash
 npm run dev
