@@ -2,7 +2,7 @@
 
 A decentralized calendar app built with Next.js, Tailwind CSS, and Pubky. Calky uses iCalendar (.ics) under the hood and stores your calendars on your Pubky homeserver. Public calendars are addressable and shareable; you stay in control of your data.
 
-This is a [Next.js](https://nextjs.org) app bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+This is a [Next.js](https://nextjs.org) app bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app) based on [`pubky-nextjs-template`](https://github.com/PastaGringo/pubky-nextjs-template)
 
 ## Features
 
