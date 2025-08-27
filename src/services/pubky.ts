@@ -1,4 +1,4 @@
-// Load config from Next.js environment variables
+// src/services/pubky.ts
 const TESTNET = process.env.NEXT_PUBLIC_TESTNET?.toLowerCase() === "true";
 // Normalize relay: remove trailing slashes and ensure '/link' suffix
 const RAW_HTTP_RELAY =
