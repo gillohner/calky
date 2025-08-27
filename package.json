@@ -1,11 +1,20 @@
 {
-  "name": "pubky-nextjs-template",
+  "name": "calky",
   "version": "0.1.0",
-  "description": "A complete Next.js template with Tailwind CSS and Pubky integration for building decentralized applications",
-  "keywords": ["nextjs", "pubky", "decentralized", "template", "tailwindcss", "typescript"],
+  "description": "A proof of concept to bring existing calendar standards to pubky",
+  "keywords": [
+    "nextjs",
+    "pubky",
+    "decentralized",
+    "iCalendar",
+    "tailwindcss",
+    "typescript",
+    "iCal",
+    "Webcal"
+  ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/PastaGringo/pubky-nextjs-template.git"
+    "url": "https://github.com/gillohner/calky.git"
   },
   "license": "MIT",
   "private": false,
