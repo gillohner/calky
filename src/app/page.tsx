@@ -1,240 +1,696 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { Star, Users, Zap, Shield, ArrowRight, Menu, X } from 'lucide-react'
-import { formatDate, truncateText } from '@/lib/utils'
-import LoginModal from '@/components/LoginModal'
-import Navigation from '@/components/Navigation'
-import { logout } from '@/services/pubky'
-import { useSession } from '@/contexts/SessionContext'
+import { useEffect, useMemo, useState } from "react";
+import {
+  Calendar as CalendarIcon,
+  Plus,
+  Loader2,
+  FileText,
+  RefreshCw,
+  MoreVertical,
+  Trash2,
+  Pencil,
+} from "lucide-react";
+import { logout } from "@/services/pubky";
+import Navigation from "@/components/Navigation";
+import LoginModal from "@/components/LoginModal";
+import Footer from "../components/Footer";
+import { useSession } from "@/contexts/SessionContext";
+import {
+  addEvent,
+  deleteCalendar,
+  deleteEvent,
+  createCalendar,
+  getCalendarIcs,
+  getIndex,
+  listEvents,
+  updateCalendarProps,
+  type CalendarIndexEntry,
+  type NewEventInput,
+} from "@/services/calendar";
+import { HexColorPicker } from "react-colorful";
 
-export default function Home() {
-  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
-  const { session, setSession } = useSession()
-  const router = useRouter()
+type ViewState = "list" | "detail";
+
+export default function Dashboard() {
+  const { session, setSession } = useSession();
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [calendars, setCalendars] = useState<CalendarIndexEntry[]>([]);
+  const [selected, setSelected] = useState<CalendarIndexEntry | null>(null);
+  const [ics, setIcs] = useState<string>("");
+  const [view, setView] = useState<ViewState>("list");
+
+  // New calendar form
+  const [displayName, setDisplayName] = useState("Personal");
+  const [color, setColor] = useState("#0ea5e9");
+  const [timezone, setTimezone] = useState("UTC");
+  const [showCalendarModal, setShowCalendarModal] = useState(false);
+
+  // Calendar edit mode and menu
+  const [isEditingCalendar, setIsEditingCalendar] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editColor, setEditColor] = useState("#0ea5e9");
+  const [editTz, setEditTz] = useState("UTC");
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // ICS UI
+  const [showIcs, setShowIcs] = useState(false);
+
+  // New event form
+  const [showEventModal, setShowEventModal] = useState(false);
+  const [summary, setSummary] = useState("");
+  const [description, setDescription] = useState("");
+  const [location, setLocation] = useState("");
+  const [start, setStart] = useState<string>("");
+  const [end, setEnd] = useState<string>("");
+
+  // Derived events from ICS
+  const events = useMemo(() => listEvents(ics), [ics]);
+
+  // Timezone options
+  const tzOptions = useMemo(() => {
+    // @ts-ignore
+    if (typeof Intl !== "undefined" && Intl.supportedValuesOf) {
+      // @ts-ignore
+      return Intl.supportedValuesOf("timeZone") as string[];
+    }
+    return [
+      "UTC",
+      "Europe/Paris",
+      "Europe/Berlin",
+      "America/New_York",
+      "America/Los_Angeles",
+      "Asia/Tokyo",
+    ];
+  }, []);
 
   const handleLogin = (newSession: any) => {
-    setSession(newSession)
-    setIsLoginModalOpen(false)
-    router.push('/dashboard')
-  }
+    setSession(newSession);
+    setIsLoginModalOpen(false);
+    void bootstrap(newSession);
+  };
 
   const handleLogout = async () => {
-    await logout()
-    setSession(null)
-  }
-  const features = [
-    {
-      icon: Shield,
-      title: "Identité Décentralisée",
-      description: "Utilisez des clés cryptographiques comme identité, sans dépendre d'autorités centrales",
-      color: "from-blue-500 to-cyan-500"
-    },
-    {
-      icon: Zap,
-      title: "Résistant à la Censure",
-      description: "Vos données restent accessibles grâce aux homeservers et au protocole PKARR",
-      color: "from-purple-500 to-pink-500"
-    },
-    {
-      icon: Users,
-      title: "Contrôle Utilisateur",
-      description: "Vous possédez et contrôlez vos données, avec une sortie crédible garantie",
-      color: "from-orange-500 to-red-500"
-    },
-    {
-      icon: Star,
-      title: "Open Source",
-      description: "Template Next.js complet avec Tailwind CSS et intégration Pubky prête à l'emploi",
-      color: "from-green-500 to-emerald-500"
-    }
-  ]
+    await logout();
+    setSession(null);
+    setIsLoginModalOpen(true);
+  };
 
-  const stats = [
-    { label: "Clients", value: "1,200+", icon: Users },
-    { label: "Projects", value: "50+", icon: Star },
-    { label: "Countries", value: "25+", icon: Shield },
-    { label: "Uptime", value: "99.9%", icon: Zap }
-  ]
+  useEffect(() => {
+    if (session) void bootstrap(session);
+  }, [session]);
+
+  async function bootstrap(s: any) {
+    setLoading(true);
+    setError(null);
+    try {
+      const idx = await getIndex(s);
+      setCalendars(idx.calendars);
+      setSelected(idx.calendars[0] || null);
+      if (idx.calendars[0]) {
+        const id = idx.calendars[0].id;
+        const { ics } = await getCalendarIcs(s, id);
+        setIcs(ics || "");
+        setView("detail");
+      }
+    } catch (e: any) {
+      setError(e?.message || "Failed to load calendars");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onCreateCalendar() {
+    if (!session) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await createCalendar(session, {
+        displayName,
+        color,
+        timezone,
+      });
+      const entry: CalendarIndexEntry = {
+        id: result.id,
+        href: `/pub/calky/cal/${result.id}/`,
+        displayName,
+        color,
+        readOnly: false,
+      };
+      setCalendars((prev) => [entry, ...prev]);
+      setSelected(entry);
+      setIcs(result.ics);
+      setView("detail");
+      setShowCalendarModal(false);
+    } catch (e: any) {
+      setError(e?.message || "Failed to create calendar");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onSelectCalendar(c: CalendarIndexEntry) {
+    if (!session) return;
+    setSelected(c);
+    setLoading(true);
+    setError(null);
+    try {
+      const { ics } = await getCalendarIcs(session, c.id);
+      setIcs(ics || "");
+      setView("detail");
+    } catch (e: any) {
+      setError(e?.message || "Failed to load calendar");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onDeleteCalendar() {
+    if (!session || !selected) return;
+    if (!confirm("Delete this calendar? This cannot be undone.")) return;
+    try {
+      setLoading(true);
+      await deleteCalendar(session, selected.id);
+      setCalendars((prev) => prev.filter((c) => c.id !== selected.id));
+      setSelected(null);
+      setIcs("\n");
+      setView("list");
+    } catch (e: any) {
+      setError(e?.message || "Failed to delete calendar");
+    } finally {
+      setLoading(false);
+      setMenuOpen(false);
+    }
+  }
+
+  function beginEditCalendar() {
+    if (!selected) return;
+    setEditName(selected.displayName);
+    setEditColor(selected.color || "#0ea5e9");
+    setEditTz(timezone);
+    setIsEditingCalendar(true);
+    setMenuOpen(false);
+  }
+
+  async function saveCalendarEdits() {
+    if (!session || !selected) return;
+    try {
+      setLoading(true);
+      const next = await updateCalendarProps(session, selected.id, {
+        displayName: editName,
+        color: editColor,
+        timezone: editTz,
+      });
+      setCalendars((prev) =>
+        prev.map((c) =>
+          c.id === selected.id
+            ? { ...c, displayName: next.displayName, color: next.color }
+            : c
+        )
+      );
+      setSelected((s) =>
+        s ? { ...s, displayName: next.displayName, color: next.color } : s
+      );
+      setIsEditingCalendar(false);
+    } catch (e: any) {
+      setError(e?.message || "Failed to update calendar");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleDeleteEvent(uid: string) {
+    if (!session || !selected) return;
+    try {
+      setLoading(true);
+      await deleteEvent(session, selected.id, uid);
+      const { ics } = await getCalendarIcs(session, selected.id);
+      setIcs(ics || "");
+    } catch (e: any) {
+      setError(e?.message || "Failed to delete event");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onCreateEvent() {
+    if (!session || !selected) return;
+    // Basic validation
+    if (!summary || !start || !end) {
+      setError("Please fill summary, start and end");
+      return;
+    }
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    if (!(startDate instanceof Date) || isNaN(startDate as unknown as number)) {
+      setError("Invalid start date");
+      return;
+    }
+    if (!(endDate instanceof Date) || isNaN(endDate as unknown as number)) {
+      setError("Invalid end date");
+      return;
+    }
+    if (endDate <= startDate) {
+      setError("End must be after start");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    try {
+      const input: NewEventInput = {
+        summary,
+        description,
+        location,
+        start: startDate,
+        end: endDate,
+      };
+      await addEvent(session, selected.id, input);
+      const { ics } = await getCalendarIcs(session, selected.id);
+      setIcs(ics || "");
+      setShowEventModal(false);
+      // reset form
+      setSummary("");
+      setDescription("");
+      setLocation("");
+      setStart("");
+      setEnd("");
+    } catch (e: any) {
+      setError(e?.message || "Failed to add event");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (!session) {
+    return (
+      <div className="min-h-screen bg-white dark:bg-slate-900">
+        <Navigation currentPage="dashboard" />
+        <div className="flex items-center justify-center min-h-[calc(100vh-80px)]">
+          <div className="text-center">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
+              Login Required
+            </h1>
+            <p className="text-gray-600 dark:text-gray-400 mb-6">
+              Please log in to access the dashboard
+            </p>
+            <button
+              onClick={() => setIsLoginModalOpen(true)}
+              className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 font-medium"
+            >
+              Connect
+            </button>
+          </div>
+        </div>
+        <LoginModal
+          isOpen={isLoginModalOpen}
+          onClose={() => setIsLoginModalOpen(false)}
+          onLogin={handleLogin}
+        />
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-slate-900 transition-colors">
-      <Navigation 
-        onLogout={handleLogout} 
-        currentPage="home" 
-        onLoginClick={() => setIsLoginModalOpen(true)}
-      />
+    <div className="min-h-screen bg-gray-50 dark:bg-slate-900">
+      <Navigation onLogout={handleLogout} currentPage="dashboard" />
 
-      {/* Hero Section */}
-      <section className="py-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <h1 className="text-4xl md:text-6xl font-bold text-gray-900 dark:text-white mb-6">
-            Next.js Template for
-            <span className="text-blue-600"> Pubky Core</span>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+            <CalendarIcon className="w-7 h-7 text-blue-600" /> Calendars
           </h1>
-          <p className="text-xl text-gray-600 dark:text-gray-300 mb-8 max-w-3xl mx-auto">
-            A complete Next.js template with Tailwind CSS and Pubky integration for building decentralized applications. 
-            Key-based identity, censorship resistance, and user control.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <button 
-              onClick={() => setIsLoginModalOpen(true)}
-              className="bg-blue-600 text-white px-8 py-3 rounded-md hover:bg-blue-700 transition-colors flex items-center justify-center"
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowCalendarModal(true)}
+              className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-2 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 font-medium flex items-center gap-2 h-10"
             >
-              Get Started with Pubky
-              <ArrowRight className="ml-2 h-5 w-5" />
+              <Plus className="w-4 h-4" /> New Calendar
             </button>
-            <a 
-              href="https://docs.pubky.org" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 px-8 py-3 rounded-md hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors inline-block text-center"
+            <button
+              onClick={() => session && bootstrap(session)}
+              className="px-4 py-2 h-10 rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors flex items-center gap-2"
+              title="Refresh"
             >
-              Pubky Documentation
-            </a>
+              <RefreshCw className="w-4 h-4" /> Reload
+            </button>
           </div>
         </div>
-      </section>
+        {/* Inline creation removed; handled via modal */}
 
-      {/* About Pubky Section */}
-      <section className="py-20 bg-white dark:bg-slate-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">What is Pubky?</h2>
-            <p className="text-xl text-gray-600 dark:text-gray-300 max-w-4xl mx-auto">
-               Pubky Core is an open-source protocol for a decentralized and user-controlled web. 
-               It combines cryptographic key-based identity (PKARR), autonomous data storage (Homeservers) 
-               and censorship resistance to create a truly free internet.
-             </p>
+        {error && (
+          <div className="bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 rounded-lg p-3 mb-4">
+            {error}
           </div>
-          <div className="grid md:grid-cols-2 gap-12 items-center">
-            <div>
-              <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Your identity, your data, your rules</h3>
-              <ul className="space-y-4 text-gray-600 dark:text-gray-300">
-                <li className="flex items-start">
-                  <Shield className="h-6 w-6 text-blue-600 mr-3 mt-0.5 flex-shrink-0" />
-                  <span><strong>Decentralized identity:</strong> Use cryptographic keys as identity, without depending on central authorities</span>
-                </li>
-                <li className="flex items-start">
-                  <Zap className="h-6 w-6 text-green-600 mr-3 mt-0.5 flex-shrink-0" />
-                  <span><strong>Credible exit:</strong> Your data remains portable and you keep control even if a server bans you</span>
-                </li>
-                <li className="flex items-start">
-                  <Users className="h-6 w-6 text-purple-600 mr-3 mt-0.5 flex-shrink-0" />
-                  <span><strong>Censorship resistance:</strong> Public Key Domains (PKDs) offer a decentralized alternative to traditional DNS</span>
-                </li>
-              </ul>
-            </div>
-            <div className="bg-gradient-to-br from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 rounded-xl p-8">
-              <h4 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">This template includes:</h4>
-              <ul className="space-y-3 text-gray-600 dark:text-gray-300">
-                <li>✅ Integrated Pubky authentication</li>
-                <li>✅ Homeserver management</li>
-                <li>✅ Modern UI with Tailwind CSS</li>
-                <li>✅ TypeScript for type safety</li>
-                <li>✅ Reusable components</li>
-                <li>✅ Dark/light theme</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </section>
+        )}
 
-      {/* Features Section */}
-      <section id="features" className="py-20 bg-gray-50 dark:bg-slate-900">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Why Pubky Core?</h2>
-            <p className="text-xl text-gray-600 dark:text-gray-300">The benefits of the decentralized web integrated into this template</p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Calendars list */}
+          <div className="md:col-span-1">
+            <div className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl overflow-hidden">
+              <ul className="divide-y divide-gray-200 dark:divide-slate-700">
+                {calendars.length === 0 && (
+                  <li className="p-4 text-gray-500 dark:text-gray-400 text-sm">
+                    No calendars yet
+                  </li>
+                )}
+                {calendars.map((c) => (
+                  <li key={c.id}>
+                    <button
+                      onClick={() => onSelectCalendar(c)}
+                      className={`w-full text-left p-4 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors ${
+                        selected?.id === c.id
+                          ? "bg-blue-50 dark:bg-blue-900/30"
+                          : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span
+                          className="w-3 h-3 rounded-full"
+                          style={{ backgroundColor: c.color || "#64748b" }}
+                        />
+                        <div>
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {c.displayName}
+                          </div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">
+                            {c.id.slice(0, 8)}…
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
-          <div className="grid md:grid-cols-3 gap-8">
-            <div className="text-center p-6">
-              <div className="bg-blue-100 dark:bg-blue-900/30 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Shield className="h-8 w-8 text-blue-600 dark:text-blue-400" />
-              </div>
-              <h3 className="text-xl font-semibold mb-2 text-gray-900 dark:text-white">PKARR</h3>
-              <p className="text-gray-600 dark:text-gray-300">Decentralized identity and routing based on cryptographic keys.</p>
-            </div>
-            <div className="text-center p-6">
-              <div className="bg-green-100 dark:bg-green-900/30 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Zap className="h-8 w-8 text-green-600 dark:text-green-400" />
-              </div>
-              <h3 className="text-xl font-semibold mb-2 text-gray-900 dark:text-white">Homeservers</h3>
-              <p className="text-gray-600 dark:text-gray-300">Autonomous data storage with guaranteed credible exit.</p>
-            </div>
-            <div className="text-center p-6">
-              <div className="bg-purple-100 dark:bg-purple-900/30 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Users className="h-8 w-8 text-purple-600 dark:text-purple-400" />
-              </div>
-              <h3 className="text-xl font-semibold mb-2 text-gray-900 dark:text-white">Complete Template</h3>
-              <p className="text-gray-600 dark:text-gray-300">Next.js, Tailwind CSS, authentication and integrated data management.</p>
-            </div>
-          </div>
-        </div>
-      </section>
 
-      {/* CTA Section */}
-      <section className="py-20 bg-blue-600 dark:bg-blue-700">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <h2 className="text-3xl font-bold text-white mb-4">Ready to build on Pubky?</h2>
-          <p className="text-xl text-blue-100 dark:text-blue-200 mb-8">Create your decentralized application with this ready-to-use template</p>
-          <button 
-            onClick={() => setIsLoginModalOpen(true)}
-            className="bg-white dark:bg-slate-100 text-blue-600 dark:text-blue-700 px-8 py-3 rounded-md hover:bg-gray-100 dark:hover:bg-slate-200 transition-colors font-semibold"
-          >
-            Get Started Now
-          </button>
-        </div>
-      </section>
+          {/* Calendar detail */}
+          <div className="md:col-span-2">
+            <div className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl p-4">
+              {!selected ? (
+                <div className="text-center text-gray-500 dark:text-gray-400">
+                  Select or create a calendar
+                </div>
+              ) : (
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <span
+                        className="w-4 h-4 rounded-full"
+                        style={{ backgroundColor: selected.color || "#64748b" }}
+                      />
+                      <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+                        {selected.displayName}
+                      </h2>
+                    </div>
+                    <div className="relative">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setShowEventModal(true)}
+                          className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-3 py-2 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 font-medium flex items-center gap-2 h-10"
+                        >
+                          <Plus className="w-4 h-4" /> Add Event
+                        </button>
+                        <button
+                          onClick={() => setMenuOpen((v) => !v)}
+                          className="px-3 py-2 h-10 rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
+                          aria-haspopup="menu"
+                          aria-expanded={menuOpen}
+                          title="More"
+                        >
+                          <MoreVertical className="w-4 h-4" />
+                        </button>
+                      </div>
+                      {menuOpen && (
+                        <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-lg shadow-lg z-10">
+                          <button
+                            onClick={beginEditCalendar}
+                            className="w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-slate-800 flex items-center gap-2 text-gray-700 dark:text-gray-200"
+                          >
+                            <Pencil className="w-4 h-4" /> Edit calendar
+                          </button>
+                          <button
+                            onClick={onDeleteCalendar}
+                            className="w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-slate-800 flex items-center gap-2 text-red-600"
+                          >
+                            <Trash2 className="w-4 h-4" /> Delete calendar
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {/* Events list as cards */}
+                  <div className="space-y-3 mb-4">
+                    {events.length === 0 && (
+                      <div className="text-sm text-gray-500 dark:text-gray-400">
+                        No events yet
+                      </div>
+                    )}
+                    {events.map((ev) => (
+                      <div
+                        key={ev.uid}
+                        className="border border-gray-200 dark:border-slate-700 rounded-lg p-3 bg-white dark:bg-slate-900 flex items-start justify-between"
+                      >
+                        <div>
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {ev.summary}
+                          </div>
+                          <div className="text-xs text-gray-600 dark:text-gray-400">
+                            {ev.start.toLocaleString()} →{" "}
+                            {ev.end.toLocaleString()}
+                          </div>
+                          {(ev.location || ev.description) && (
+                            <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                              {ev.location && <span>📍 {ev.location} </span>}
+                              {ev.description && (
+                                <span>— {ev.description}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => handleDeleteEvent(ev.uid)}
+                          className="px-2 py-1 rounded bg-red-50 dark:bg-red-900/30 text-red-600 hover:bg-red-100 dark:hover:bg-red-900/50 text-sm"
+                          title="Delete event"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
 
-      {/* Footer */}
-      <footer className="bg-gray-900 dark:bg-slate-950 text-white py-12">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid md:grid-cols-4 gap-8">
-            <div>
-              <div className="flex items-center mb-4">
-                <Zap className="h-6 w-6 text-blue-400" />
-                <span className="ml-2 text-lg font-bold">Pubky Template</span>
-              </div>
-              <p className="text-gray-400 dark:text-gray-300">Next.js template for Pubky decentralized applications.</p>
+                  {/* Collapsible raw ICS */}
+                  <div className="border border-gray-200 dark:border-slate-700 rounded-lg">
+                    <button
+                      onClick={() => setShowIcs((v) => !v)}
+                      className="w-full flex items-center justify-between px-3 py-2 text-left bg-gray-50 dark:bg-slate-900 text-gray-700 dark:text-gray-300 rounded-t-lg"
+                    >
+                      <span className="flex items-center gap-2">
+                        <FileText className="w-4 h-4" /> Raw calendar.ics
+                      </span>
+                      <span className="text-xs">{showIcs ? "▾" : "▸"}</span>
+                    </button>
+                    {showIcs && (
+                      <pre className="p-3 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap overflow-auto max-h-96 rounded-b-lg bg-white dark:bg-slate-800">
+                        {loading ? "Loading…" : ics}
+                      </pre>
+                    )}
+                  </div>
+
+                  {/* Inline calendar edit controls */}
+                  {isEditingCalendar && (
+                    <div className="mt-4 border-t border-gray-200 dark:border-slate-700 pt-4">
+                      <div className="grid md:grid-cols-4 gap-3 items-center">
+                        <input
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          placeholder="Display name"
+                          className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white"
+                        />
+                        <div className="flex items-center gap-3">
+                          <HexColorPicker
+                            color={editColor}
+                            onChange={setEditColor}
+                          />
+                          <input
+                            value={editColor}
+                            onChange={(e) => setEditColor(e.target.value)}
+                            className="w-32 px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white"
+                          />
+                        </div>
+                        <select
+                          value={editTz}
+                          onChange={(e) => setEditTz(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white"
+                        >
+                          {tzOptions.map((tz) => (
+                            <option key={tz} value={tz}>
+                              {tz}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => setIsEditingCalendar(false)}
+                            className="px-4 py-2 rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={saveCalendarEdits}
+                            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                          >
+                            Save
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-            <div>
-              <h3 className="font-semibold mb-4">Pubky Core</h3>
-              <ul className="space-y-2 text-gray-400 dark:text-gray-300">
-                <li><a href="https://www.pubky.org" target="_blank" rel="noopener noreferrer" className="hover:text-white">Official Site</a></li>
-                <li><a href="https://docs.pubky.org" target="_blank" rel="noopener noreferrer" className="hover:text-white">Documentation</a></li>
-                <li><a href="https://github.com/pubky" target="_blank" rel="noopener noreferrer" className="hover:text-white">GitHub</a></li>
-              </ul>
-            </div>
-            <div>
-              <h3 className="font-semibold mb-4">Technologies</h3>
-              <ul className="space-y-2 text-gray-400 dark:text-gray-300">
-                <li><a href="https://nextjs.org" target="_blank" rel="noopener noreferrer" className="hover:text-white">Next.js</a></li>
-                <li><a href="https://tailwindcss.com" target="_blank" rel="noopener noreferrer" className="hover:text-white">Tailwind CSS</a></li>
-                <li><a href="https://www.typescriptlang.org" target="_blank" rel="noopener noreferrer" className="hover:text-white">TypeScript</a></li>
-              </ul>
-            </div>
-            <div>
-              <h3 className="font-semibold mb-4">Resources</h3>
-              <ul className="space-y-2 text-gray-400 dark:text-gray-300">
-                <li><a href="https://docs.pubky.org" target="_blank" rel="noopener noreferrer" className="hover:text-white">Getting Started</a></li>
-                <li><a href="https://github.com/pubky" target="_blank" rel="noopener noreferrer" className="hover:text-white">Examples</a></li>
-                <li><a href="https://www.pubky.org" target="_blank" rel="noopener noreferrer" className="hover:text-white">Community</a></li>
-              </ul>
-            </div>
-          </div>
-          <div className="border-t border-gray-800 dark:border-gray-700 mt-8 pt-8 text-center text-gray-400 dark:text-gray-300">
-            <p>&copy; 2024 Pubky Template. Built with Next.js and Tailwind CSS.</p>
           </div>
         </div>
-      </footer>
-      
+      </div>
+
+      {/* Event modal */}
+      {showEventModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full p-6 border border-gray-200 dark:border-slate-700">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+              New Event
+            </h3>
+            <div className="space-y-3">
+              <input
+                value={summary}
+                onChange={(e) => setSummary(e.target.value)}
+                placeholder="Summary"
+                className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white"
+              />
+              <input
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                placeholder="Location"
+                className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white"
+              />
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Description"
+                className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white"
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <input
+                  type="datetime-local"
+                  value={start}
+                  onChange={(e) => setStart(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white"
+                />
+                <input
+                  type="datetime-local"
+                  value={end}
+                  onChange={(e) => setEnd(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white"
+                />
+              </div>
+            </div>
+            {error && (
+              <div className="mt-3 text-sm text-red-600 dark:text-red-400">
+                {error}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 mt-6">
+              <button
+                onClick={() => setShowEventModal(false)}
+                className="px-4 py-2 rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={onCreateEvent}
+                className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-2 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 font-medium flex items-center gap-2"
+              >
+                {loading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Plus className="w-4 h-4" />
+                )}
+                Create Event
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Calendar modal */}
+      {showCalendarModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full p-6 border border-gray-200 dark:border-slate-700">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+              New Calendar
+            </h3>
+            <div className="space-y-4">
+              <input
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="Display name"
+                className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white"
+              />
+              <div>
+                <HexColorPicker color={color} onChange={setColor} />
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    value={color}
+                    onChange={(e) => setColor(e.target.value)}
+                    className="w-32 px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white"
+                  />
+                  <span
+                    className="inline-block w-6 h-6 rounded"
+                    style={{ backgroundColor: color }}
+                  />
+                </div>
+              </div>
+              <select
+                value={timezone}
+                onChange={(e) => setTimezone(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white"
+              >
+                {tzOptions.map((tz) => (
+                  <option key={tz} value={tz}>
+                    {tz}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+              <button
+                onClick={() => setShowCalendarModal(false)}
+                className="px-4 py-2 rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={onCreateCalendar}
+                className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-2 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 font-medium"
+              >
+                Create Calendar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <LoginModal
         isOpen={isLoginModalOpen}
         onClose={() => setIsLoginModalOpen(false)}
         onLogin={handleLogin}
       />
+
+      <Footer />
     </div>
-  )
+  );
 }

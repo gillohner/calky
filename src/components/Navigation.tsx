@@ -1,21 +1,33 @@
-'use client'
+"use client";
 
-import { User, Settings, Moon, Sun, Home, LayoutDashboard } from 'lucide-react'
-import { useTheme } from '@/hooks/useTheme'
-import { useSession } from '@/contexts/SessionContext'
+import {
+  User,
+  Settings,
+  Moon,
+  Sun,
+  Home,
+  LayoutDashboard,
+  Calendar as CalendarIcon,
+} from "lucide-react";
+import { useTheme } from "@/hooks/useTheme";
+import { useSession } from "@/contexts/SessionContext";
 
 interface NavigationProps {
-  session?: any
-  onLogout?: () => void
-  onLoginClick?: () => void
-  currentPage?: 'home' | 'profile' | 'settings' | 'dashboard'
+  session?: any;
+  onLogout?: () => void;
+  onLoginClick?: () => void;
+  currentPage?: "home" | "profile" | "settings" | "dashboard";
 }
 
-export default function Navigation({ onLogout, onLoginClick, currentPage = 'home' }: NavigationProps) {
-  const { theme, toggleTheme } = useTheme()
-  const { session, isLoading } = useSession()
+export default function Navigation({
+  onLogout,
+  onLoginClick,
+  currentPage = "home",
+}: NavigationProps) {
+  const { theme, toggleTheme } = useTheme();
+  const { session, isLoading } = useSession();
 
-  const isCurrentPage = (page: string) => currentPage === page
+  const isCurrentPage = (page: string) => currentPage === page;
 
   return (
     <header className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-gray-200 dark:border-slate-700 sticky top-0 z-40">
@@ -24,17 +36,19 @@ export default function Navigation({ onLogout, onLoginClick, currentPage = 'home
           <div className="flex items-center space-x-2">
             <a href="/" className="flex items-center space-x-2">
               <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-sm">P</span>
+                <span className="text-white font-bold text-sm">
+                  <CalendarIcon />
+                </span>
               </div>
-              <span className="text-xl font-bold text-gray-900 dark:text-white">Pubky Template</span>
+              <span className="text-xl font-bold text-gray-900 dark:text-white">
+                Calky
+              </span>
             </a>
           </div>
-          
-          <nav className="flex items-center space-x-4">
 
-            
+          <nav className="flex items-center space-x-4">
             {/* Home link for other pages */}
-            {currentPage !== 'home' && (
+            {currentPage !== "home" && (
               <a
                 href="/"
                 className="p-2 rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
@@ -43,9 +57,9 @@ export default function Navigation({ onLogout, onLoginClick, currentPage = 'home
                 <Home className="w-5 h-5" />
               </a>
             )}
-            
+
             {/* Dashboard link for logged in users */}
-            {!isLoading && session && currentPage !== 'dashboard' && (
+            {!isLoading && session && currentPage !== "dashboard" && (
               <a
                 href="/dashboard"
                 className="p-2 rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
@@ -54,17 +68,21 @@ export default function Navigation({ onLogout, onLoginClick, currentPage = 'home
                 <LayoutDashboard className="w-5 h-5" />
               </a>
             )}
-            
+
             {/* Theme toggle */}
             <button
               onClick={toggleTheme}
               className="p-2 rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
             >
-              {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
+              {theme === "light" ? (
+                <Moon className="w-5 h-5" />
+              ) : (
+                <Sun className="w-5 h-5" />
+              )}
             </button>
-            
+
             {/* Settings link for logged in users */}
-            {!isLoading && session && currentPage !== 'settings' && (
+            {!isLoading && session && currentPage !== "settings" && (
               <a
                 href="/settings"
                 className="p-2 rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
@@ -73,16 +91,16 @@ export default function Navigation({ onLogout, onLoginClick, currentPage = 'home
                 <Settings className="w-5 h-5" />
               </a>
             )}
-            
+
             {/* User navigation */}
             {!isLoading && session && (
               <>
                 <a
                   href="/profile"
                   className={`p-2 rounded-lg transition-colors ${
-                    isCurrentPage('profile')
-                      ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400'
-                      : 'bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+                    isCurrentPage("profile")
+                      ? "bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400"
+                      : "bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
                   }`}
                   title="My Profile"
                 >
@@ -91,9 +109,9 @@ export default function Navigation({ onLogout, onLoginClick, currentPage = 'home
                 <a
                   href="/settings"
                   className={`p-2 rounded-lg transition-colors ${
-                    isCurrentPage('settings')
-                      ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400'
-                      : 'bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+                    isCurrentPage("settings")
+                      ? "bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400"
+                      : "bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
                   }`}
                   title="Settings"
                 >
@@ -101,7 +119,7 @@ export default function Navigation({ onLogout, onLoginClick, currentPage = 'home
                 </a>
               </>
             )}
-            
+
             {/* User information and logout */}
             {!isLoading && session && onLogout ? (
               <div className="flex items-center space-x-4">
@@ -129,5 +147,5 @@ export default function Navigation({ onLogout, onLoginClick, currentPage = 'home
         </div>
       </div>
     </header>
-  )
+  );
 }

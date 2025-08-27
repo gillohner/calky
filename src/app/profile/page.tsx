@@ -1,108 +1,107 @@
-'use client'
+"use client";
 
-import { useEffect, useState } from 'react'
-import { Copy, Check, Server, User } from 'lucide-react'
-import { logout, initPubkyClient } from '@/services/pubky'
-import LoginModal from '@/components/LoginModal'
-import Navigation from '@/components/Navigation'
-import { useSession } from '@/contexts/SessionContext'
+import { useEffect, useState } from "react";
+import { Copy, Check, Server, User } from "lucide-react";
+import { logout, initPubkyClient } from "@/services/pubky";
+import LoginModal from "@/components/LoginModal";
+import Navigation from "@/components/Navigation";
+import { useSession } from "@/contexts/SessionContext";
 
 export default function Profile() {
-  const { session, setSession, isLoading } = useSession()
-  const [copied, setCopied] = useState(false)
-  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
-  const [homeserver, setHomeserver] = useState<any>(null)
-  const [homeserverLoading, setHomeserverLoading] = useState(false)
-  const [homeserverError, setHomeserverError] = useState<string | null>(null)
+  const { session, setSession, isLoading } = useSession();
+  const [copied, setCopied] = useState(false);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [homeserver, setHomeserver] = useState<any>(null);
+  const [homeserverLoading, setHomeserverLoading] = useState(false);
+  const [homeserverError, setHomeserverError] = useState<string | null>(null);
 
   useEffect(() => {
     if (session) {
-      getHomeserverFor(session)
+      getHomeserverFor(session);
     }
-  }, [session])
+  }, [session]);
 
   const getHomeserverFor = async (session: any) => {
     if (!session || !session.pubkey) {
-      setHomeserverError('Invalid session or missing pubkey')
-      return
+      setHomeserverError("Invalid session or missing pubkey");
+      return;
     }
 
-    setHomeserverLoading(true)
-    setHomeserverError(null)
-    
+    setHomeserverLoading(true);
+    setHomeserverError(null);
+
     try {
-       const clientInstance = await initPubkyClient()
-       const { PublicKey } = await import('@synonymdev/pubky')
-       const userPk = PublicKey.from(session.pubkey)
-       const homeserver = await clientInstance.getHomeserver(userPk)
-      
+      const clientInstance = await initPubkyClient();
+      const { PublicKey } = await import("@synonymdev/pubky");
+      const userPk = PublicKey.from(session.pubkey);
+      const homeserver = await clientInstance.getHomeserver(userPk);
+
       if (!homeserver) {
-        throw new Error('No homeserver found for this pubkey')
+        throw new Error("No homeserver found for this pubkey");
       }
 
-      let addresses = []
-      let port = null
+      let addresses = [];
+      let port = null;
 
       try {
-        if (typeof homeserver.getAddresses === 'function') {
-          addresses = await homeserver.getAddresses()
+        if (typeof homeserver.getAddresses === "function") {
+          addresses = await homeserver.getAddresses();
         }
-        if (!addresses.length && typeof homeserver.addr === 'string') {
-          addresses = [homeserver.addr]
+        if (!addresses.length && typeof homeserver.addr === "string") {
+          addresses = [homeserver.addr];
         }
-        if (typeof homeserver.port === 'number') {
-          port = homeserver.port
+        if (typeof homeserver.port === "number") {
+          port = homeserver.port;
         }
-        if (!port && typeof homeserver.getPort === 'function') {
-          port = await homeserver.getPort()
+        if (!port && typeof homeserver.getPort === "function") {
+          port = await homeserver.getPort();
         }
       } catch (e) {
-        console.warn('Failed to probe homeserver address:', e)
+        console.warn("Failed to probe homeserver address:", e);
       }
 
       setHomeserver({
         key: homeserver.z32(),
         addresses,
-        port
-      })
+        port,
+      });
     } catch (error) {
-      console.error('❌ Error resolving homeserver:', error)
-      setHomeserverError(error instanceof Error ? error.message : 'Unknown error')
+      console.error("❌ Error resolving homeserver:", error);
+      setHomeserverError(
+        error instanceof Error ? error.message : "Unknown error"
+      );
     } finally {
-      setHomeserverLoading(false)
+      setHomeserverLoading(false);
     }
-  }
+  };
 
   const copyToClipboard = async (text: string) => {
     try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     } catch (err) {
-      console.error('Failed to copy text: ', err)
+      console.error("Failed to copy text: ", err);
     }
-  }
+  };
 
   const handleLogin = (newSession: any) => {
-    setSession(newSession)
-    setIsLoginModalOpen(false)
-    getHomeserverFor(newSession)
-  }
+    setSession(newSession);
+    setIsLoginModalOpen(false);
+    getHomeserverFor(newSession);
+  };
 
   const handleLogout = () => {
-    logout()
-    setSession(null)
-    setHomeserver(null)
-    setHomeserverError(null)
-    setHomeserverLoading(false)
-  }
+    logout();
+    setSession(null);
+    setHomeserver(null);
+    setHomeserverError(null);
+    setHomeserverLoading(false);
+  };
 
   return (
     <div className="min-h-screen bg-white dark:bg-slate-900">
-      <Navigation 
-        onLogout={handleLogout} 
-        currentPage="profile" 
-      />
+      <Navigation onLogout={handleLogout} currentPage="profile" />
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -182,14 +181,18 @@ export default function Profile() {
                     <div className="bg-gray-50 dark:bg-slate-700 p-3 rounded-lg border dark:border-slate-600">
                       <div className="flex items-center space-x-2">
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                        <span className="text-sm text-gray-600 dark:text-gray-400">Resolving homeserver...</span>
+                        <span className="text-sm text-gray-600 dark:text-gray-400">
+                          Resolving homeserver...
+                        </span>
                       </div>
                     </div>
                   ) : homeserverError ? (
                     <div className="bg-red-50 dark:bg-red-900/20 p-3 rounded-lg border border-red-200 dark:border-red-800">
                       <div className="flex items-center space-x-2">
                         <Server className="h-4 w-4 text-red-500" />
-                        <span className="text-sm text-red-600 dark:text-red-400">{homeserverError}</span>
+                        <span className="text-sm text-red-600 dark:text-red-400">
+                          {homeserverError}
+                        </span>
                       </div>
                     </div>
                   ) : homeserver ? (
@@ -197,26 +200,40 @@ export default function Profile() {
                       <div className="space-y-2">
                         <div className="flex items-center space-x-2">
                           <Server className="h-4 w-4 text-green-500" />
-                          <span className="text-sm font-medium text-gray-900 dark:text-gray-100">Homeserver key:</span>
+                          <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                            Homeserver key:
+                          </span>
                         </div>
                         <code className="text-sm text-gray-900 dark:text-gray-100 break-all block">
                           {homeserver.key}
                         </code>
-                        {homeserver.addresses && homeserver.addresses.length > 0 && (
-                          <div>
-                            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Addresses:</span>
-                            <ul className="text-sm text-gray-600 dark:text-gray-400 ml-4">
-                              {homeserver.addresses.map((addr: string, index: number) => (
-                                <li key={index}>• {addr}{homeserver.port ? `:${homeserver.port}` : ''}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
+                        {homeserver.addresses &&
+                          homeserver.addresses.length > 0 && (
+                            <div>
+                              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                Addresses:
+                              </span>
+                              <ul className="text-sm text-gray-600 dark:text-gray-400 ml-4">
+                                {homeserver.addresses.map(
+                                  (addr: string, index: number) => (
+                                    <li key={index}>
+                                      • {addr}
+                                      {homeserver.port
+                                        ? `:${homeserver.port}`
+                                        : ""}
+                                    </li>
+                                  )
+                                )}
+                              </ul>
+                            </div>
+                          )}
                       </div>
                     </div>
                   ) : (
                     <div className="bg-gray-50 dark:bg-slate-700 p-3 rounded-lg border dark:border-slate-600">
-                      <span className="text-sm text-gray-600 dark:text-gray-400">No homeserver found</span>
+                      <span className="text-sm text-gray-600 dark:text-gray-400">
+                        No homeserver found
+                      </span>
                     </div>
                   )}
                 </div>
@@ -256,7 +273,7 @@ export default function Profile() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
           <div className="text-center">
             <p className="text-gray-600 dark:text-gray-400">
-              © 2024 Pubky Template. Built with Next.js and Tailwind CSS.
+              © 2025 Calky. Built with Next.js and Tailwind CSS.
             </p>
           </div>
         </div>
@@ -269,5 +286,5 @@ export default function Profile() {
         onLogin={handleLogin}
       />
     </div>
-  )
+  );
 }

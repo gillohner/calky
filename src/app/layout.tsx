@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Pubky Core - Identité Décentralisée",
-  description: "Plateforme d'identité décentralisée basée sur Pubky Core pour une expérience web sécurisée et souveraine",
+  title: "Calky",
+  description: "Bringing existing calendar standards to the Pubky ecosystem",
 };
 
 export default function RootLayout({
@@ -45,9 +45,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen`}
         suppressHydrationWarning
       >
-        <SessionProvider>
-          {children}
-        </SessionProvider>
+        <SessionProvider>{children}</SessionProvider>
       </body>
     </html>
   );
