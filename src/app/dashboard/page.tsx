@@ -1,7 +1,7 @@
 // src/app/dashboard/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Calendar as CalendarIcon,
   Plus,

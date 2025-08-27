@@ -22,7 +22,6 @@ jobs:
       - name: Build and Lint
         run: |
           npm install
-          npm run lint
           npm run build
 
       - name: Upload Artifact

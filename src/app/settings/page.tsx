@@ -4,9 +4,6 @@
 import { useEffect, useState } from "react";
 import {
   Settings,
-  User,
-  Copy,
-  Check,
   CheckCircle,
   XCircle,
   RefreshCw,
