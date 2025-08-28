@@ -16,6 +16,8 @@ export interface CalendarProps {
   readOnly?: boolean;
   owner?: string; // owner pubkey z32
   description?: string;
+  method?: string; // iCalendar method (REQUEST, PUBLISH, etc.)
+  calscale?: string; // Calendar scale (GREGORIAN)
 }
 
 export interface CalendarIndexEntry {
@@ -30,13 +32,49 @@ export interface CalendarIndex {
   calendars: CalendarIndexEntry[];
 }
 
-// Small contract for event creation
+// RFC 2445 compliant event creation
 export interface NewEventInput {
-  summary: string;
+  summary: string; // REQUIRED
   description?: string;
   location?: string;
   start: Date; // local Date, we'll serialize as UTC Z
   end: Date; // must be > start
+  // RFC 2445 additional properties
+  categories?: string[]; // Event categories
+  class?: "PUBLIC" | "PRIVATE" | "CONFIDENTIAL"; // Access classification
+  status?: "TENTATIVE" | "CONFIRMED" | "CANCELLED"; // Event status
+  transp?: "OPAQUE" | "TRANSPARENT"; // Time transparency
+  priority?: number; // Priority 0-9
+  sequence?: number; // Revision sequence number
+  // Recurrence properties
+  rrule?: string; // Recurrence rule
+  exdate?: Date[]; // Exception dates
+  // Attendee/Organizer properties
+  organizer?: {
+    email: string;
+    cn?: string; // Common name
+    sentBy?: string;
+  };
+  attendees?: Array<{
+    email: string;
+    cn?: string; // Common name
+    role?: "CHAIR" | "REQ-PARTICIPANT" | "OPT-PARTICIPANT" | "NON-PARTICIPANT";
+    partstat?:
+      | "NEEDS-ACTION"
+      | "ACCEPTED"
+      | "DECLINED"
+      | "TENTATIVE"
+      | "DELEGATED";
+    rsvp?: boolean;
+  }>;
+  // Alarm properties
+  alarms?: Array<{
+    action: "DISPLAY" | "AUDIO" | "EMAIL";
+    trigger: string; // e.g., "-PT15M" for 15 minutes before
+    description?: string;
+    repeat?: number;
+    duration?: string;
+  }>;
 }
 
 export interface CalendarEvent {
@@ -46,6 +84,25 @@ export interface CalendarEvent {
   location?: string;
   start: Date;
   end: Date;
+  created: Date;
+  lastModified: Date;
+  dtstamp: Date;
+  sequence: number;
+  status?: string;
+  categories?: string[];
+  priority?: number;
+  class?: string;
+  organizer?: {
+    email: string;
+    cn?: string;
+  };
+  attendees?: Array<{
+    email: string;
+    cn?: string;
+    role?: string;
+    partstat?: string;
+    rsvp?: boolean;
+  }>;
   raw: string; // full VEVENT block text
 }
 
@@ -134,6 +191,357 @@ async function computeEtag(text: string): Promise<string> {
   return `W/"${hex}"`;
 }
 
+// RFC 2445 utility functions
+function escapeText(text: string): string {
+  return text
+    .replace(/\\/g, "\\\\") // Backslash escaping
+    .replace(/;/g, "\\;") // Semicolon escaping
+    .replace(/,/g, "\\,") // Comma escaping
+    .replace(/\n/g, "\\n") // Newline escaping
+    .replace(/\r/g, "\\r"); // Carriage return escaping
+}
+
+function formatDateTime(date: Date): string {
+  return date
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}/, "");
+}
+
+function formatDate(date: Date): string {
+  return date.toISOString().slice(0, 10).replace(/-/g, "");
+}
+
+// RFC 2445 content line folding (max 75 octets per line)
+function foldLine(line: string): string {
+  if (line.length <= 75) return line;
+
+  const folded = [];
+  let start = 0;
+
+  while (start < line.length) {
+    if (start === 0) {
+      // First line can be up to 75 characters
+      folded.push(line.substring(start, Math.min(start + 75, line.length)));
+      start += 75;
+    } else {
+      // Continuation lines start with space and can be up to 74 more chars
+      folded.push(
+        " " + line.substring(start, Math.min(start + 74, line.length))
+      );
+      start += 74;
+    }
+  }
+
+  return folded.join("\r\n");
+}
+
+// RFC 2445 compliant VCALENDAR generation
+function baseVcalendar(props?: CalendarProps): string {
+  const prodid = "PRODID:-//Calky//EN";
+  const version = "VERSION:2.0";
+  const calscale = props?.calscale
+    ? `CALSCALE:${props.calscale}`
+    : "CALSCALE:GREGORIAN";
+  const method = props?.method ? `METHOD:${props.method}` : "";
+  const displayName = props?.displayName
+    ? `X-WR-CALNAME:${props.displayName}`
+    : "";
+
+  const lines = ["BEGIN:VCALENDAR", prodid, version, calscale];
+
+  if (method) lines.push(method);
+  if (displayName) lines.push(displayName);
+
+  lines.push("END:VCALENDAR");
+
+  return lines.map(foldLine).join("\r\n");
+}
+
+// RFC 2445 compliant VEVENT generation
+function buildVevent(input: NewEventInput, uid?: string): string {
+  const now = new Date();
+  const eventUid = uid || `${crypto.randomUUID()}@calky`;
+
+  const lines = [
+    "BEGIN:VEVENT",
+    foldLine(`UID:${eventUid}`),
+    foldLine(`DTSTAMP:${formatDateTime(now)}`),
+    foldLine(`DTSTART:${formatDateTime(input.start)}`),
+    foldLine(`DTEND:${formatDateTime(input.end)}`),
+    foldLine(`SUMMARY:${escapeText(input.summary)}`),
+    foldLine(`CREATED:${formatDateTime(now)}`),
+    foldLine(`LAST-MODIFIED:${formatDateTime(now)}`),
+  ];
+
+  // Optional properties
+  if (input.description) {
+    lines.push(foldLine(`DESCRIPTION:${escapeText(input.description)}`));
+  }
+
+  if (input.location) {
+    lines.push(foldLine(`LOCATION:${escapeText(input.location)}`));
+  }
+
+  if (input.categories && input.categories.length > 0) {
+    lines.push(
+      foldLine(`CATEGORIES:${input.categories.map(escapeText).join(",")}`)
+    );
+  }
+
+  if (input.class) {
+    lines.push(foldLine(`CLASS:${input.class}`));
+  }
+
+  if (input.status) {
+    lines.push(foldLine(`STATUS:${input.status}`));
+  }
+
+  if (input.transp) {
+    lines.push(foldLine(`TRANSP:${input.transp}`));
+  }
+
+  if (input.priority !== undefined) {
+    lines.push(foldLine(`PRIORITY:${input.priority}`));
+  }
+
+  if (input.sequence !== undefined) {
+    lines.push(foldLine(`SEQUENCE:${input.sequence}`));
+  } else {
+    lines.push(foldLine(`SEQUENCE:0`));
+  }
+
+  // Recurrence properties
+  if (input.rrule) {
+    lines.push(foldLine(`RRULE:${input.rrule}`));
+  }
+
+  if (input.exdate && input.exdate.length > 0) {
+    const exdates = input.exdate.map(formatDateTime).join(",");
+    lines.push(foldLine(`EXDATE:${exdates}`));
+  }
+
+  // Organizer
+  if (input.organizer) {
+    let organizerLine = `ORGANIZER`;
+    if (input.organizer.cn) {
+      organizerLine += `;CN="${escapeText(input.organizer.cn)}"`;
+    }
+    if (input.organizer.sentBy) {
+      organizerLine += `;SENT-BY="${input.organizer.sentBy}"`;
+    }
+    organizerLine += `:MAILTO:${input.organizer.email}`;
+    lines.push(foldLine(organizerLine));
+  }
+
+  // Attendees
+  if (input.attendees && input.attendees.length > 0) {
+    for (const attendee of input.attendees) {
+      let attendeeLine = `ATTENDEE`;
+      if (attendee.cn) {
+        attendeeLine += `;CN="${escapeText(attendee.cn)}"`;
+      }
+      if (attendee.role) {
+        attendeeLine += `;ROLE=${attendee.role}`;
+      }
+      if (attendee.partstat) {
+        attendeeLine += `;PARTSTAT=${attendee.partstat}`;
+      }
+      if (attendee.rsvp !== undefined) {
+        attendeeLine += `;RSVP=${attendee.rsvp ? "TRUE" : "FALSE"}`;
+      }
+      attendeeLine += `:MAILTO:${attendee.email}`;
+      lines.push(foldLine(attendeeLine));
+    }
+  }
+
+  lines.push("END:VEVENT");
+
+  // Add alarms
+  if (input.alarms && input.alarms.length > 0) {
+    const alarmLines = [];
+    for (const alarm of input.alarms) {
+      alarmLines.push("BEGIN:VALARM");
+      alarmLines.push(foldLine(`ACTION:${alarm.action}`));
+      alarmLines.push(foldLine(`TRIGGER:${alarm.trigger}`));
+
+      if (alarm.description) {
+        alarmLines.push(
+          foldLine(`DESCRIPTION:${escapeText(alarm.description)}`)
+        );
+      }
+
+      if (alarm.repeat !== undefined) {
+        alarmLines.push(foldLine(`REPEAT:${alarm.repeat}`));
+      }
+
+      if (alarm.duration) {
+        alarmLines.push(foldLine(`DURATION:${alarm.duration}`));
+      }
+
+      alarmLines.push("END:VALARM");
+    }
+
+    // Insert alarms before END:VEVENT
+    lines.splice(lines.length - 1, 0, ...alarmLines);
+  }
+
+  return lines.join("\r\n");
+}
+
+function appendVevent(ics: string, vevent: string): string {
+  const endIndex = ics.lastIndexOf("END:VCALENDAR");
+  if (endIndex === -1) throw new Error("Invalid VCALENDAR format");
+  return ics.slice(0, endIndex) + vevent + "\r\n" + ics.slice(endIndex);
+}
+
+function removeVeventByUid(ics: string, uid: string): string {
+  const lines = ics.split(/\r?\n/);
+  const result = [];
+  let inEvent = false;
+  let eventUid = "";
+  let eventLines: string[] = [];
+
+  for (const line of lines) {
+    if (line === "BEGIN:VEVENT") {
+      inEvent = true;
+      eventLines = [line];
+      eventUid = "";
+    } else if (line === "END:VEVENT" && inEvent) {
+      eventLines.push(line);
+      if (eventUid !== uid) {
+        result.push(...eventLines);
+      }
+      inEvent = false;
+      eventLines = [];
+    } else if (inEvent) {
+      eventLines.push(line);
+      if (line.startsWith("UID:")) {
+        eventUid = line.substring(4).trim();
+      }
+    } else {
+      result.push(line);
+    }
+  }
+
+  return result.join("\r\n");
+}
+
+function replaceVeventByUid(
+  ics: string,
+  uid: string,
+  newVevent: string
+): string {
+  const withoutOld = removeVeventByUid(ics, uid);
+  return appendVevent(withoutOld, newVevent);
+}
+
+// Parse VEVENT from ICS content
+export function listEvents(ics: string): CalendarEvent[] {
+  if (!ics || !ics.includes("BEGIN:VEVENT")) return [];
+
+  const events: CalendarEvent[] = [];
+  const lines = ics.split(/\r?\n/);
+  let currentEvent: Partial<CalendarEvent> | null = null;
+  let inEvent = false;
+  let eventLines: string[] = [];
+
+  for (const line of lines) {
+    if (line === "BEGIN:VEVENT") {
+      inEvent = true;
+      currentEvent = {};
+      eventLines = [line];
+    } else if (line === "END:VEVENT" && inEvent) {
+      eventLines.push(line);
+      if (currentEvent) {
+        currentEvent.raw = eventLines.join("\r\n");
+
+        // Validate required fields
+        if (
+          currentEvent.uid &&
+          currentEvent.summary &&
+          currentEvent.start &&
+          currentEvent.end
+        ) {
+          events.push(currentEvent as CalendarEvent);
+        }
+      }
+      inEvent = false;
+      currentEvent = null;
+      eventLines = [];
+    } else if (inEvent && currentEvent) {
+      eventLines.push(line);
+
+      // Parse properties
+      if (line.startsWith("UID:")) {
+        currentEvent.uid = line.substring(4).trim();
+      } else if (line.startsWith("SUMMARY:")) {
+        currentEvent.summary = line.substring(8).trim();
+      } else if (line.startsWith("DESCRIPTION:")) {
+        currentEvent.description = line.substring(12).trim();
+      } else if (line.startsWith("LOCATION:")) {
+        currentEvent.location = line.substring(9).trim();
+      } else if (line.startsWith("DTSTART:")) {
+        const dateStr = line.substring(8).trim();
+        currentEvent.start = new Date(
+          dateStr.replace(
+            /(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?/,
+            "$1-$2-$3T$4:$5:$6Z"
+          )
+        );
+      } else if (line.startsWith("DTEND:")) {
+        const dateStr = line.substring(6).trim();
+        currentEvent.end = new Date(
+          dateStr.replace(
+            /(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?/,
+            "$1-$2-$3T$4:$5:$6Z"
+          )
+        );
+      } else if (line.startsWith("CREATED:")) {
+        const dateStr = line.substring(8).trim();
+        currentEvent.created = new Date(
+          dateStr.replace(
+            /(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?/,
+            "$1-$2-$3T$4:$5:$6Z"
+          )
+        );
+      } else if (line.startsWith("LAST-MODIFIED:")) {
+        const dateStr = line.substring(14).trim();
+        currentEvent.lastModified = new Date(
+          dateStr.replace(
+            /(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?/,
+            "$1-$2-$3T$4:$5:$6Z"
+          )
+        );
+      } else if (line.startsWith("DTSTAMP:")) {
+        const dateStr = line.substring(8).trim();
+        currentEvent.dtstamp = new Date(
+          dateStr.replace(
+            /(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?/,
+            "$1-$2-$3T$4:$5:$6Z"
+          )
+        );
+      } else if (line.startsWith("SEQUENCE:")) {
+        currentEvent.sequence = parseInt(line.substring(9).trim(), 10) || 0;
+      } else if (line.startsWith("STATUS:")) {
+        currentEvent.status = line.substring(7).trim();
+      } else if (line.startsWith("CATEGORIES:")) {
+        currentEvent.categories = line
+          .substring(11)
+          .trim()
+          .split(",")
+          .map((s) => s.trim());
+      } else if (line.startsWith("PRIORITY:")) {
+        currentEvent.priority = parseInt(line.substring(9).trim(), 10);
+      } else if (line.startsWith("CLASS:")) {
+        currentEvent.class = line.substring(6).trim();
+      }
+    }
+  }
+
+  return events;
+}
+
 // Ensure index.json exists at app root
 export async function ensureIndex(session: any): Promise<CalendarIndex> {
   const { index } = paths(session.pubkey);
@@ -195,6 +603,8 @@ export async function createCalendar(
     color?: string;
     timezone?: string;
     description?: string;
+    method?: string;
+    calscale?: string;
   },
   initialEvent?: NewEventInput
 ) {
@@ -212,13 +622,15 @@ export async function createCalendar(
     color: initProps.color,
     timezone: initProps.timezone,
     description: initProps.description,
+    method: initProps.method || "PUBLISH",
+    calscale: initProps.calscale || "GREGORIAN",
     ctag: "v1",
     readOnly: false,
     owner: session.pubkey,
   };
 
-  // 3) Prepare base VCALENDAR
-  let ics = baseVcalendar();
+  // 3) Prepare base VCALENDAR with RFC 2445 compliance
+  let ics = baseVcalendar(props);
   if (initialEvent) {
     const ev = buildVevent(initialEvent);
     ics = appendVevent(ics, ev);
@@ -268,7 +680,8 @@ export async function addEvent(
     session,
     calendarId
   );
-  const current = oldIcs ?? baseVcalendar();
+  const calProps = await getCalendarProps(session, calendarId);
+  const current = oldIcs ?? baseVcalendar(calProps || undefined);
   const event = buildVevent(input);
   let nextIcs = appendVevent(current, event);
 
@@ -286,7 +699,10 @@ export async function addEvent(
   if (put.status === 412 /* Precondition Failed */ || put.status === 409) {
     // Re-read and attempt one merge by appending again
     const reread = await getCalendarIcs(session, calendarId);
-    const merged = appendVevent(reread.ics ?? baseVcalendar(), event);
+    const merged = appendVevent(
+      reread.ics ?? baseVcalendar(calProps || undefined),
+      event
+    );
     nextIcs = merged;
     put = await writeText(
       icsUrl,
@@ -321,7 +737,8 @@ export async function deleteEvent(
     session,
     calendarId
   );
-  const current = oldIcs ?? baseVcalendar();
+  const calProps = await getCalendarProps(session, calendarId);
+  const current = oldIcs ?? baseVcalendar(calProps || undefined);
   const next = removeVeventByUid(current, uid);
   if (next === current) return { ok: true } as const; // nothing to do
 
@@ -337,7 +754,10 @@ export async function deleteEvent(
   );
   if (put.status === 412 || put.status === 409) {
     const reread = await getCalendarIcs(session, calendarId);
-    const merged = removeVeventByUid(reread.ics ?? baseVcalendar(), uid);
+    const merged = removeVeventByUid(
+      reread.ics ?? baseVcalendar(calProps || undefined),
+      uid
+    );
     put = await writeText(
       icsUrl,
       merged,
@@ -369,7 +789,8 @@ export async function updateEvent(
     session,
     calendarId
   );
-  const current = oldIcs ?? baseVcalendar();
+  const calProps = await getCalendarProps(session, calendarId);
+  const current = oldIcs ?? baseVcalendar(calProps || undefined);
   const updatedBlock = buildVevent(updates, uid);
   const next = replaceVeventByUid(current, uid, updatedBlock);
 
@@ -385,14 +806,14 @@ export async function updateEvent(
   );
   if (put.status === 412 || put.status === 409) {
     const reread = await getCalendarIcs(session, calendarId);
-    const next2 = replaceVeventByUid(
-      reread.ics ?? baseVcalendar(),
+    const merged = replaceVeventByUid(
+      reread.ics ?? baseVcalendar(calProps || undefined),
       uid,
       updatedBlock
     );
     put = await writeText(
       icsUrl,
-      next2,
+      merged,
       "text/calendar; charset=utf-8",
       reread.etag || undefined
     );
@@ -410,209 +831,94 @@ export async function updateEvent(
   return { ok: true } as const;
 }
 
-// List events parsed from ICS
-export function listEvents(ics: string): CalendarEvent[] {
-  const events: CalendarEvent[] = [];
-  if (!ics) return events;
-  const blocks = ics.split(/BEGIN:VEVENT\r?\n|BEGIN:VEVENT\n/);
-  for (let i = 1; i < blocks.length; i++) {
-    const afterBegin = blocks[i];
-    const endIdx = afterBegin.indexOf("END:VEVENT");
-    if (endIdx === -1) continue;
-    const block = afterBegin.slice(0, endIdx).trim();
-    const raw = `BEGIN:VEVENT\n${block}\nEND:VEVENT`;
-    const lines = block.split(/\r?\n/);
-    const get = (prefix: string) =>
-      lines.find((l) => l.startsWith(prefix + ":"))?.slice(prefix.length + 1);
-    const uid = get("UID") || crypto.randomUUID();
-    const summary = get("SUMMARY") || "(no summary)";
-    const description = get("DESCRIPTION");
-    const location = get("LOCATION");
-    const ds = get("DTSTART");
-    const de = get("DTEND");
-    const parse = (v?: string) => (v ? icsDateToDate(v) : new Date());
-    events.push({
-      uid,
-      summary: unescapeText(summary),
-      description: unescapeText(description || ""),
-      location: unescapeText(location || ""),
-      start: parse(ds),
-      end: parse(de),
-      raw,
-    });
-  }
-  // sort by start time
-  events.sort((a, b) => a.start.getTime() - b.start.getTime());
-  return events;
-}
-
-// Update calendar props.json (e.g., displayName, color, timezone, description)
-export async function updateCalendarProps(
-  session: any,
-  calendarId: string,
-  partial: Partial<
-    Pick<CalendarProps, "displayName" | "color" | "timezone" | "description">
-  >
-) {
-  const p = paths(session.pubkey, calendarId);
-  const url = pkUrl(session.pubkey, p.props!);
-  const res = await readJson<CalendarProps>(url);
-  if (!res.ok || !res.data) throw new Error("Failed to read props.json");
-  const next = { ...res.data, ...partial } as CalendarProps;
-  const w = await writeJson(url, next);
-  if (!w.ok) throw new Error(`Failed to write props.json (status ${w.status})`);
-  return next;
-}
-
-// Delete calendar: remove from index and delete files
+// Delete entire calendar
 export async function deleteCalendar(session: any, calendarId: string) {
-  const p = paths(session.pubkey, calendarId);
-  const client = await initPubkyClient();
-  // Best-effort delete files (folders may remain)
-  const files = [p.props!, p.ics!, p.etag!];
-  await Promise.all(
-    files.map(async (rel) => {
-      const url = pkUrl(session.pubkey, rel);
-      try {
-        const r = await client.fetch(url, {
-          method: "DELETE",
-          credentials: "include",
-        });
-        if (!r.ok && r.status !== 404) {
-          console.warn("Delete failed", rel, r.status);
-        }
-      } catch (e) {
-        console.warn("Delete error", rel, e);
-      }
-    })
-  );
+  const index = await getIndex(session);
+  const updated = {
+    calendars: index.calendars.filter((c) => c.id !== calendarId),
+  };
 
-  // Update index.json to remove entry
-  const idxPath = paths(session.pubkey).index;
-  const idxUrl = pkUrl(session.pubkey, idxPath);
-  const res = await readJson<CalendarIndex>(idxUrl);
-  if (res.ok && res.data) {
-    const next: CalendarIndex = {
-      calendars: (res.data.calendars || []).filter((c) => c.id !== calendarId),
-    };
-    await writeJson(idxUrl, next);
-  }
+  const idxUrl = pkUrl(session.pubkey, paths(session.pubkey).index);
+  const put = await writeJson(idxUrl, updated);
+  if (!put.ok)
+    throw new Error(`Failed to update index.json (status ${put.status})`);
+
   return { ok: true } as const;
 }
 
-// Increment props.ctag (vN)
-async function bumpCtag(session: any, calendarId: string) {
+// Update calendar properties
+export async function updateCalendarProps(
+  session: any,
+  calendarId: string,
+  updates: Partial<
+    Pick<
+      CalendarProps,
+      | "displayName"
+      | "color"
+      | "timezone"
+      | "description"
+      | "method"
+      | "calscale"
+    >
+  >
+) {
+  const currentProps = await getCalendarProps(session, calendarId);
+  if (!currentProps) throw new Error("Calendar not found");
+
+  const updatedProps = { ...currentProps, ...updates };
   const p = paths(session.pubkey, calendarId);
-  const url = pkUrl(session.pubkey, p.props!);
-  const res = await readJson<CalendarProps>(url);
-  if (!res.ok || !res.data) return; // soft fail
-  const current = res.data;
-  const match = String(current.ctag || "v0").match(/^v(\d+)$/);
-  const next = match ? `v${Number(match[1]) + 1}` : "v1";
-  current.ctag = next;
-  await writeJson(url, current);
+  const propsUrl = pkUrl(session.pubkey, p.props!);
+
+  const put = await writeJson(propsUrl, updatedProps);
+  if (!put.ok)
+    throw new Error(`Failed to update props.json (status ${put.status})`);
+
+  // Update index as well
+  const index = await getIndex(session);
+  const updatedIndex = {
+    calendars: index.calendars.map((c) =>
+      c.id === calendarId
+        ? {
+            ...c,
+            displayName: updatedProps.displayName,
+            color: updatedProps.color,
+          }
+        : c
+    ),
+  };
+
+  const idxUrl = pkUrl(session.pubkey, paths(session.pubkey).index);
+  const idxPut = await writeJson(idxUrl, updatedIndex);
+  if (!idxPut.ok)
+    throw new Error(`Failed to update index.json (status ${idxPut.status})`);
+
+  await bumpCtag(session, calendarId);
+  return updatedProps;
 }
 
-// VCALENDAR skeleton
-function baseVcalendar() {
-  return [
-    "BEGIN:VCALENDAR",
-    "VERSION:2.0",
-    "PRODID:-//Calky//Pubky//EN",
-    "CALSCALE:GREGORIAN",
-    "END:VCALENDAR",
-    "",
-  ].join("\n");
+// Bump collection tag for change tracking
+async function bumpCtag(session: any, calendarId: string) {
+  const props = await getCalendarProps(session, calendarId);
+  if (!props) return;
+
+  const currentNum = parseInt(props.ctag.slice(1)) || 1;
+  const newCtag = `v${currentNum + 1}`;
+
+  const updatedProps = { ...props, ctag: newCtag };
+  const p = paths(session.pubkey, calendarId);
+  const propsUrl = pkUrl(session.pubkey, p.props!);
+
+  await writeJson(propsUrl, updatedProps);
 }
 
-function formatUtc(dt: Date) {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const y = dt.getUTCFullYear();
-  const m = pad(dt.getUTCMonth() + 1);
-  const d = pad(dt.getUTCDate());
-  const hh = pad(dt.getUTCHours());
-  const mm = pad(dt.getUTCMinutes());
-  const ss = pad(dt.getUTCSeconds());
-  return `${y}${m}${d}T${hh}${mm}${ss}Z`;
-}
-
-function escapeText(s?: string) {
-  if (!s) return "";
-  return s
-    .replace(/\\/g, "\\\\")
-    .replace(/\n/g, "\\n")
-    .replace(/,/g, "\\,")
-    .replace(/;/g, "\\;");
-}
-
-function buildVevent(ev: NewEventInput, fixedUid?: string) {
-  const uid = fixedUid || crypto.randomUUID();
-  const dtstamp = formatUtc(new Date());
-  const dtstart = formatUtc(ev.start);
-  const dtend = formatUtc(ev.end);
-  const lines = [
-    "BEGIN:VEVENT",
-    `UID:${uid}`,
-    `DTSTAMP:${dtstamp}`,
-    `DTSTART:${dtstart}`,
-    `DTEND:${dtend}`,
-    `SUMMARY:${escapeText(ev.summary)}`,
-  ];
-  if (ev.description) lines.push(`DESCRIPTION:${escapeText(ev.description)}`);
-  if (ev.location) lines.push(`LOCATION:${escapeText(ev.location)}`);
-  lines.push("END:VEVENT");
-  return lines.join("\n");
-}
-
-function appendVevent(ics: string, vevent: string) {
-  const endIdx = ics.lastIndexOf("END:VCALENDAR");
-  if (endIdx === -1) return `${ics}\n${vevent}\n`; // fallback
-  const before = ics.slice(0, endIdx);
-  const after = ics.slice(endIdx);
-  return `${before}${vevent}\n${after}`;
-}
-
-function removeVeventByUid(ics: string, uid: string) {
-  const re = new RegExp(
-    `(BEGIN:VEVENT[\s\S]*?\nUID:${uid}\r?\n[\s\S]*?END:VEVENT\r?\n?)`,
-    "m"
-  );
-  return ics.replace(re, "");
-}
-
-function replaceVeventByUid(ics: string, uid: string, newBlock: string) {
-  const removed = removeVeventByUid(ics, uid);
-  // If nothing removed, append
-  if (removed === ics) return appendVevent(ics, newBlock);
-  // Insert new block before END:VCALENDAR
-  return appendVevent(removed, newBlock);
-}
-
-function icsDateToDate(v: string): Date {
-  // Expect Zulu: YYYYMMDDTHHMMSSZ or date-only YYYYMMDD
-  if (/^\d{8}T\d{6}Z$/.test(v)) {
-    const y = Number(v.slice(0, 4));
-    const m = Number(v.slice(4, 6)) - 1;
-    const d = Number(v.slice(6, 8));
-    const hh = Number(v.slice(9, 11));
-    const mm = Number(v.slice(11, 13));
-    const ss = Number(v.slice(13, 15));
-    return new Date(Date.UTC(y, m, d, hh, mm, ss));
-  }
-  if (/^\d{8}$/.test(v)) {
-    const y = Number(v.slice(0, 4));
-    const m = Number(v.slice(4, 6)) - 1;
-    const d = Number(v.slice(6, 8));
-    return new Date(Date.UTC(y, m, d));
-  }
-  // Fallback to Date parse
-  return new Date(v);
-}
-
-function unescapeText(s: string) {
-  return s
-    .replace(/\\n/g, "\n")
-    .replace(/\\,/g, ",")
-    .replace(/\\;/g, ";")
-    .replace(/\\\\/g, "\\");
-}
+// Export all functions for use
+export {
+  buildVevent,
+  appendVevent,
+  removeVeventByUid,
+  replaceVeventByUid,
+  escapeText,
+  formatDateTime,
+  formatDate,
+  foldLine,
+};
