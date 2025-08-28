@@ -7,7 +7,6 @@ import {
   Moon,
   Sun,
   Home,
-  LayoutDashboard,
   Calendar as CalendarIcon,
 } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
@@ -17,7 +16,7 @@ interface NavigationProps {
   session?: any;
   onLogout?: () => void;
   onLoginClick?: () => void;
-  currentPage?: "home" | "profile" | "settings" | "dashboard";
+  currentPage?: "home" | "profile" | "settings";
 }
 
 export default function Navigation({
@@ -56,17 +55,6 @@ export default function Navigation({
                 title="Home"
               >
                 <Home className="w-5 h-5" />
-              </a>
-            )}
-
-            {/* Dashboard link for logged in users */}
-            {!isLoading && session && currentPage !== "dashboard" && (
-              <a
-                href="/dashboard"
-                className="p-2 rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
-                title="Dashboard"
-              >
-                <LayoutDashboard className="w-5 h-5" />
               </a>
             )}
 

@@ -290,14 +290,14 @@ export default function Dashboard() {
   if (!session) {
     return (
       <div className="min-h-screen bg-white dark:bg-slate-900">
-        <Navigation currentPage="dashboard" />
+        <Navigation currentPage="home" />
         <div className="flex items-center justify-center min-h-[calc(100vh-80px)]">
           <div className="text-center">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
               Login Required
             </h1>
             <p className="text-gray-600 dark:text-gray-400 mb-6">
-              Please log in to access the dashboard
+              Please log in to access your Calendars
             </p>
             <button
               onClick={() => setIsLoginModalOpen(true)}
@@ -318,7 +318,7 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-900">
-      <Navigation onLogout={handleLogout} currentPage="dashboard" />
+      <Navigation onLogout={handleLogout} currentPage="home" />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex items-center justify-between mb-6">
