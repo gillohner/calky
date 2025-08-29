@@ -32,7 +32,7 @@ import CalendarModal from "@/components/calendar/CalendarModal";
 
 type ViewState = "list" | "detail";
 
-export default function Dashboard() {
+export default function CalendarOverview() {
   const { session, setSession } = useSession();
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -353,13 +353,6 @@ export default function Dashboard() {
               className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-2 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 font-medium flex items-center gap-2 h-10"
             >
               <Plus className="w-4 h-4" /> New Calendar
-            </button>
-            <button
-              onClick={() => session && bootstrap(session)}
-              className="px-4 py-2 h-10 rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors flex items-center gap-2"
-              title="Refresh"
-            >
-              <RefreshCw className="w-4 h-4" />
             </button>
           </div>
         </div>
