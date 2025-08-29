@@ -19,6 +19,9 @@ import {
   updateCalendarProps,
   type CalendarIndexEntry,
   type NewEventInput,
+  // cache helpers
+  clearCalendarCache,
+  clearAllCalendarCache,
 } from "@/services/calendar";
 import CalendarList from "@/components/calendar/CalendarList";
 import CalendarHeader from "@/components/calendar/CalendarHeader";
@@ -85,19 +88,33 @@ export default function Dashboard() {
     ];
   }, []);
 
+  // Helper to fully reset calendar-related UI state
+  function resetUiState() {
+    setCalendars([]);
+    setSelected(null);
+    setIcs("");
+    setView("list");
+  }
+
   const handleLogin = (newSession: any) => {
     setSession(newSession);
     setIsLoginModalOpen(false);
-    void bootstrap(newSession);
+    // bootstrap will be triggered by the session effect below
   };
 
   const handleLogout = async () => {
+    // Clear local ICS cache for this user before dropping session
+    const pk = session?.pubkey;
     await logout();
+    if (pk) clearAllCalendarCache(pk);
+    resetUiState();
     setSession(null);
     setIsLoginModalOpen(true);
   };
 
   useEffect(() => {
+    // On any session change, reset UI first to avoid showing previous user's data
+    resetUiState();
     if (session) void bootstrap(session);
   }, [session]);
 
@@ -192,6 +209,8 @@ export default function Dashboard() {
     setLoading(true);
     try {
       await deleteCalendar(session, selected.id);
+      // Drop any leftover cache explicitly
+      clearCalendarCache(session.pubkey, selected.id);
       setCalendars((prev) => prev.filter((c) => c.id !== selected.id));
       setSelected(null);
       setIcs("\n");
@@ -340,7 +359,7 @@ export default function Dashboard() {
               className="px-4 py-2 h-10 rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors flex items-center gap-2"
               title="Refresh"
             >
-              <RefreshCw className="w-4 h-4" /> Reload
+              <RefreshCw className="w-4 h-4" />
             </button>
           </div>
         </div>

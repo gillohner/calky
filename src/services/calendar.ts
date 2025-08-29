@@ -138,10 +138,15 @@ async function pkFetch(url: string, init?: RequestInit) {
   });
 }
 
+// Add cache-busting to all GETs to avoid Nexus stale responses
+function withCacheBust(url: string): string {
+  return url + (url.includes("?") ? "&" : "?") + "t=" + Date.now();
+}
+
 async function readText(
   url: string
 ): Promise<{ ok: boolean; status: number; text?: string }> {
-  const res = await pkFetch(url, {
+  const res = await pkFetch(withCacheBust(url), {
     method: "GET",
     headers: new Headers({ "Cache-Control": "no-cache" }),
   });
@@ -153,7 +158,7 @@ async function readText(
 async function readJson<T>(
   url: string
 ): Promise<{ ok: boolean; status: number; data?: T }> {
-  const res = await pkFetch(url, {
+  const res = await pkFetch(withCacheBust(url), {
     method: "GET",
     headers: new Headers({
       Accept: "application/json",
@@ -578,6 +583,69 @@ export async function getCalendarProps(
   throw new Error(`Failed to load props.json (status ${res.status})`);
 }
 
+// Local ICS cache (per-user, per-calendar)
+const CACHE_PREFIX = "calky_ics_cache_v1";
+const FRESH_WINDOW_MS = 40 * 60 * 1000; // 40 minutes
+
+type CachedIcs = {
+  ics: string;
+  etag: string | null;
+  updatedAt: number;
+};
+
+function cacheKey(pubkey: string, calendarId: string) {
+  return `${CACHE_PREFIX}:${pubkey}:${calendarId}`;
+}
+
+function readIcsCache(pubkey: string, calendarId: string): CachedIcs | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(cacheKey(pubkey, calendarId));
+    return raw ? (JSON.parse(raw) as CachedIcs) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeIcsCache(
+  pubkey: string,
+  calendarId: string,
+  ics: string,
+  etag: string | null
+) {
+  if (typeof window === "undefined") return;
+  try {
+    const val: CachedIcs = { ics, etag: etag ?? null, updatedAt: Date.now() };
+    localStorage.setItem(cacheKey(pubkey, calendarId), JSON.stringify(val));
+  } catch {
+    // ignore quota/JSON errors
+  }
+}
+
+export function clearCalendarCache(pubkey: string, calendarId: string) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem(cacheKey(pubkey, calendarId));
+  } catch {
+    // ignore
+  }
+}
+
+export function clearAllCalendarCache(pubkey: string) {
+  if (typeof window === "undefined") return;
+  try {
+    const prefix = `${CACHE_PREFIX}:${pubkey}:`;
+    const toRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(prefix)) toRemove.push(k);
+    }
+    for (const k of toRemove) localStorage.removeItem(k);
+  } catch {
+    // ignore
+  }
+}
+
 export async function getCalendarIcs(
   session: any,
   calendarId: string
@@ -585,14 +653,43 @@ export async function getCalendarIcs(
   const p = paths(session.pubkey, calendarId);
   const icsUrl = pkUrl(session.pubkey, p.ics!);
   const etagUrl = pkUrl(session.pubkey, p.etag!);
-  const [icsRes, etagRes] = await Promise.all([
-    readText(icsUrl),
-    readText(etagUrl),
-  ]);
-  return {
-    ics: icsRes.ok ? icsRes.text || "" : null,
-    etag: etagRes.ok ? (etagRes.text || "").trim() : null,
-  };
+
+  const local = readIcsCache(session.pubkey, calendarId);
+
+  // First, try to read remote etag to detect changes without downloading full ICS
+  const etagRes = await readText(etagUrl);
+  const serverEtag = etagRes.ok ? (etagRes.text || "").trim() : null;
+
+  // If we have a local cache and etags match, return local immediately
+  if (local && local.etag && local.etag === serverEtag) {
+    return { ics: local.ics, etag: local.etag };
+  }
+
+  // If we have a local cache, but server etag differs (likely stale Nexus) and our cache is fresh, prefer local
+  const cacheIsFresh =
+    !!local && Date.now() - local.updatedAt < FRESH_WINDOW_MS;
+
+  if (local && cacheIsFresh && serverEtag && local.etag !== serverEtag) {
+    // Prefer local (assume Nexus is stale)
+    return { ics: local.ics, etag: local.etag };
+  }
+
+  // Fetch server ICS as a fallback or when no cache or no etag
+  const icsRes = await readText(icsUrl);
+  if (icsRes.ok) {
+    const serverIcs = icsRes.text || "";
+    // Update local cache with what we got
+    writeIcsCache(session.pubkey, calendarId, serverIcs, serverEtag);
+    return { ics: serverIcs, etag: serverEtag };
+  }
+
+  // If server failed but we have local cache, use it
+  if (local) {
+    return { ics: local.ics, etag: local.etag };
+  }
+
+  // Nothing available
+  return { ics: null, etag: null };
 }
 
 // Create a new calendar collection with UUID id
@@ -652,6 +749,9 @@ export async function createCalendar(
       `Failed to create calendar (${wProps.status}/${wIcs.status}/${wEtag.status})`
     );
   }
+
+  // Keep local cache in sync
+  writeIcsCache(session.pubkey, id, ics, etag);
 
   // 5) Update index.json
   const entry: CalendarIndexEntry = {
@@ -721,6 +821,9 @@ export async function addEvent(
   if (!wE.ok)
     throw new Error(`Failed to update etag.txt (status ${wE.status})`);
 
+  // Update local cache to reflect latest ICS immediately
+  writeIcsCache(session.pubkey, calendarId, nextIcs, nextEtag);
+
   // Bump ctag in props.json
   await bumpCtag(session, calendarId);
 
@@ -746,6 +849,8 @@ export async function deleteEvent(
   const icsUrl = pkUrl(session.pubkey, p.ics!);
   const etagUrl = pkUrl(session.pubkey, p.etag!);
 
+  let finalIcs = next;
+
   let put = await writeText(
     icsUrl,
     next,
@@ -758,6 +863,7 @@ export async function deleteEvent(
       reread.ics ?? baseVcalendar(calProps || undefined),
       uid
     );
+    finalIcs = merged;
     put = await writeText(
       icsUrl,
       merged,
@@ -769,10 +875,13 @@ export async function deleteEvent(
     throw new Error(`Failed to write calendar.ics (status ${put.status})`);
   }
 
-  const nextEtag = await computeEtag(next);
+  const nextEtag = await computeEtag(finalIcs);
   const wE = await writeText(etagUrl, nextEtag, "text/plain; charset=utf-8");
   if (!wE.ok)
     throw new Error(`Failed to update etag.txt (status ${wE.status})`);
+
+  // Update local cache
+  writeIcsCache(session.pubkey, calendarId, finalIcs, nextEtag);
 
   await bumpCtag(session, calendarId);
   return { ok: true } as const;
@@ -798,6 +907,8 @@ export async function updateEvent(
   const icsUrl = pkUrl(session.pubkey, p.ics!);
   const etagUrl = pkUrl(session.pubkey, p.etag!);
 
+  let finalIcs = next;
+
   let put = await writeText(
     icsUrl,
     next,
@@ -811,6 +922,7 @@ export async function updateEvent(
       uid,
       updatedBlock
     );
+    finalIcs = merged;
     put = await writeText(
       icsUrl,
       merged,
@@ -822,10 +934,13 @@ export async function updateEvent(
     throw new Error(`Failed to write calendar.ics (status ${put.status})`);
   }
 
-  const nextEtag = await computeEtag(next);
+  const nextEtag = await computeEtag(finalIcs);
   const wE = await writeText(etagUrl, nextEtag, "text/plain; charset=utf-8");
   if (!wE.ok)
     throw new Error(`Failed to update etag.txt (status ${wE.status})`);
+
+  // Update local cache
+  writeIcsCache(session.pubkey, calendarId, finalIcs, nextEtag);
 
   await bumpCtag(session, calendarId);
   return { ok: true } as const;
@@ -842,6 +957,9 @@ export async function deleteCalendar(session: any, calendarId: string) {
   const put = await writeJson(idxUrl, updated);
   if (!put.ok)
     throw new Error(`Failed to update index.json (status ${put.status})`);
+
+  // Drop local cache for this calendar
+  clearCalendarCache(session.pubkey, calendarId);
 
   return { ok: true } as const;
 }

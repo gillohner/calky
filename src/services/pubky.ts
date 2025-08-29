@@ -280,5 +280,17 @@ export async function deleteAppFolder(session: any) {
 export function logout() {
   if (typeof window !== "undefined") {
     localStorage.removeItem("session");
+    // Also clear any cached ICS entries to avoid cross-user bleed-through
+    try {
+      const prefix = "calky_ics_cache_v1:";
+      const toRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(prefix)) toRemove.push(k);
+      }
+      for (const k of toRemove) localStorage.removeItem(k);
+    } catch {
+      // ignore storage errors
+    }
   }
 }
